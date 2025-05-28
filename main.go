@@ -11,6 +11,8 @@ import (
 	"github.com/joho/godotenv"
 	"chirpy/internal/database"
 	"os"
+	"github.com/google/uuid"
+	"sort"
 )
 
 type apiConfig struct {
@@ -70,9 +72,9 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := User{
-		ID:        dbUser.ID.UUID,
-		CreatedAt: dbUser.CreatedAt.Time, // assuming sql.NullTime
-		UpdatedAt: dbUser.UpdatedAt.Time,
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt, 
+		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
 	}
 
@@ -82,6 +84,93 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	respondWithJson(w, 201, jsr)
+}
+
+func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
+	type cred struct {
+		Body string `json:"body"`
+		User_id string `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := cred{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	userUUID, err := uuid.Parse(params.User_id)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	var par database.CreateChirpParams
+	par.Body = params.Body
+	par.UserID = userUUID
+
+	dbChirp, err := cfg.dbQueries.CreateChirp(r.Context(), par)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	chirp := mapChirp(dbChirp)
+
+	jsr, err := json.Marshal(chirp)
+	if err != nil {
+		panic(err)
+	}
+	respondWithJson(w, 201, jsr)
+}
+
+func (cfg *apiConfig) GetChirps(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := cfg.dbQueries.GetChirps(r.Context())
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+	chirps := []Chirp{}
+	for _, c := range dbChirps {
+		chirps = append(chirps, mapChirp(c))
+	}
+	sort.Slice(chirps, func(i, j int) bool {
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
+	jsr, err := json.Marshal(chirps)
+		if err != nil {
+			panic(err)
+		}
+	respondWithJson(w, 200, jsr)
+}
+
+func (cfg *apiConfig) GetChirpByID(w http.ResponseWriter, r *http.Request) {
+	idstr := r.PathValue("chirpid")
+	chirpID, err := uuid.Parse(idstr)
+		if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+		}
+
+	dbChirp, err := cfg.dbQueries.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+	chirp := mapChirp(dbChirp)
+
+	jsr, err := json.Marshal(chirp)
+		if err != nil {
+			panic(err)
+		}
+	respondWithJson(w, 200, jsr)
 }
 
 func main() {
@@ -100,8 +189,10 @@ func main() {
 	birdmux.HandleFunc("GET /admin/healthz", readiness)
 	birdmux.HandleFunc("GET /admin/metrics", birdcfg.metrics)
 	birdmux.HandleFunc("POST /admin/reset", birdcfg.ressetmetrics)
-	birdmux.HandleFunc("POST /api/validate_chirp", validate_chirp)
 	birdmux.HandleFunc("POST /api/users", birdcfg.createUser)
+	birdmux.HandleFunc("POST /api/chirps", birdcfg.createChirp)
+	birdmux.HandleFunc("GET /api/chirps", birdcfg.GetChirps)
+	birdmux.HandleFunc("GET /api/chirps/{chirpid}", birdcfg.GetChirpByID)
 
 	var birdserver http.Server
 	birdserver.Addr = ":8080"
@@ -115,7 +206,7 @@ func readiness(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func validate_chirp(w http.ResponseWriter, r *http.Request) {
+func validate_chirp(r *http.Request) (bool, error) {
 	type chirp struct {
 		Body string
 	}
@@ -124,17 +215,12 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	ch := chirp{}
 	err := decoder.Decode(&ch)
 	if err != nil {
-		res := fmt.Sprintf(`{"error":"%v"}`, err)
-		formJsonResponse(w, 500, res)
-		return
+		return false, err
 	}
 	if len(ch.Body) <= 140 {
-		res := fmt.Sprintf(`{"cleaned_body":"%s"}`, stripProfane(ch.Body))
-		formJsonResponse(w, 200, res)
-		return
+		return true, nil
 	} else {
-		res := fmt.Sprintf(`{"error":"Chirp is too long"}`)
-		formJsonResponse(w, 400, res)
+		return false, fmt.Errorf("Chirp too long")
 	}
 }
 
@@ -170,3 +256,13 @@ func stripProfane(content string) string {
 	return clean
 }
 
+func mapChirp(c database.Chirp) (Chirp) {
+	chirp := Chirp{
+		ID:        c.ID,
+		CreatedAt: c.CreatedAt, 
+		UpdatedAt: c.UpdatedAt,
+		Body:	   c.Body,
+		User_id:   c.UserID,
+	}
+	return chirp
+}
