@@ -13,6 +13,7 @@ import (
 	"os"
 	"github.com/google/uuid"
 	"sort"
+	"chirpy/internal/auth"
 )
 
 type apiConfig struct {
@@ -52,19 +53,32 @@ func (cfg *apiConfig) ressetmetrics(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type cred struct {
+		Password string
 		Email string
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	params := cred{}
-	err := decoder.Decode(&params)
+	creds := cred{}
+	err := decoder.Decode(&creds)
 	if err != nil {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
 		formJsonResponse(w, 500, res)
 		return
 	}
 
-	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	hash, err := auth.HashPassword(creds.Password)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	params := database.CreateUserParams{
+		Email: creds.Email,
+		HashedPassword: hash,
+	}
+
+	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), params)
 	if err != nil {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
 		formJsonResponse(w, 500, res)
@@ -84,6 +98,47 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	respondWithJson(w, 201, jsr)
+}
+
+func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
+	type cred struct {
+		Password string
+		Email string
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	creds := cred{}
+	err := decoder.Decode(&creds)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+	dbUser, err := cfg.dbQueries.GetUserByEmail(r.Context(), creds.Email)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	err = auth.CheckPasswordHash(dbUser.HashedPassword, creds.Password)
+		if err != nil {
+			res := fmt.Sprintf(`{"error":"%v"}`, err)
+			formJsonResponse(w, 401, res)
+		}
+
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt, 
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	}
+
+	jsr, err := json.Marshal(user)
+	if err != nil {
+		panic(err)
+	}
+	respondWithJson(w, 200, jsr)
 }
 
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +248,7 @@ func main() {
 	birdmux.HandleFunc("POST /api/chirps", birdcfg.createChirp)
 	birdmux.HandleFunc("GET /api/chirps", birdcfg.GetChirps)
 	birdmux.HandleFunc("GET /api/chirps/{chirpid}", birdcfg.GetChirpByID)
+	birdmux.HandleFunc("POST /api/login", birdcfg.Login)
 
 	var birdserver http.Server
 	birdserver.Addr = ":8080"
