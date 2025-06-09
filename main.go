@@ -14,12 +14,14 @@ import (
 	"github.com/google/uuid"
 	"sort"
 	"chirpy/internal/auth"
+	"time"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
 	Platform string
+	Secret string
 }
 
 func (cfg *apiConfig) mwMetricsInc(next http.Handler) http.Handler {
@@ -104,6 +106,7 @@ func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
 	type cred struct {
 		Password string
 		Email string
+		Expires_in_seconds int
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -114,6 +117,11 @@ func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
 		formJsonResponse(w, 500, res)
 		return
 	}
+
+	if creds.Expires_in_seconds >= 3600 || creds.Expires_in_seconds <= 0 {
+		creds.Expires_in_seconds = 3600
+	} 
+
 	dbUser, err := cfg.dbQueries.GetUserByEmail(r.Context(), creds.Email)
 	if err != nil {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
@@ -127,11 +135,15 @@ func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
 			formJsonResponse(w, 401, res)
 		}
 
+	d := time.Duration(creds.Expires_in_seconds) * time.Second
+	token, err := auth.MakeJWT(dbUser.ID, cfg.Secret, d)
+
 	user := User{
 		ID:        dbUser.ID,
 		CreatedAt: dbUser.CreatedAt, 
 		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
+		Token:	   token,
 	}
 
 	jsr, err := json.Marshal(user)
@@ -156,10 +168,17 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userUUID, err := uuid.Parse(params.User_id)
+	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
-		formJsonResponse(w, 500, res)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	userUUID, err := auth.ValidateJWT(token, cfg.Secret)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
 		return
 	}
 
@@ -238,6 +257,7 @@ func main() {
 
 	birdcfg := apiConfig{}
 	birdcfg.Platform = os.Getenv("PLATFORM")
+	birdcfg.Secret = os.Getenv("SECRET")
 	birdcfg.dbQueries = database.New(db)
 	var birdmux = http.NewServeMux()
 	birdmux.Handle("/app/", http.StripPrefix("/app", birdcfg.mwMetricsInc(http.FileServer(http.Dir(".")))))
