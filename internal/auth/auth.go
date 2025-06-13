@@ -1,20 +1,23 @@
 package auth
 
 import (
-	"golang.org/x/crypto/bcrypt"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"errors"
-	"time"
-	"strings"
-	"net/http"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 10)
-		if err != nil {
-			return "", err
-		}
+	if err != nil {
+		return "", err
+	}
 	return string(hash), nil
 }
 
@@ -23,14 +26,14 @@ func CheckPasswordHash(hash, password string) error {
 	return err
 }
 
-func MakeJWT(user_id uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(user_id uuid.UUID, tokenSecret string) (string, error) {
 	chirpyKey := []byte(tokenSecret)
 
 	claims := jwt.RegisteredClaims{
-		Issuer:		"chirpy",
-		IssuedAt:	jwt.NewNumericDate(time.Now()),
-		ExpiresAt:  jwt.NewNumericDate(time.Now().Add(expiresIn)),
-		Subject:	user_id.String(),
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+		Subject:   user_id.String(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -66,8 +69,14 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 func GetBearerToken(headers http.Header) (string, error) {
 	authString := headers.Get("Authorization")
 	if len(authString) <= 0 {
-		return "", errors.New("No token present")
+		return "", errors.New("no token present")
 	}
 	tokenString := strings.TrimPrefix(authString, "Bearer ")
 	return tokenString, nil
+}
+
+func MakeRefreshTOken() (string, error) {
+	key := make([]byte, 32)
+	rand.Read(key)
+	return hex.EncodeToString(key), nil
 }
