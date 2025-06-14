@@ -15,5 +15,8 @@ select * from chirps;
 -- name: GetChirp :one
 select * from chirps where id = $1;
 
+-- name: GetChirpOwner :one
+select user_id from chirps where id = $1;
+
 -- name: DeleteChirp :exec
-delete 
+delete from chirps where id = $1;

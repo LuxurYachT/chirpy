@@ -239,7 +239,7 @@ func (cfg *apiConfig) GetChirpByID(w http.ResponseWriter, r *http.Request) {
 	dbChirp, err := cfg.dbQueries.GetChirp(r.Context(), chirpID)
 	if err != nil {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
-		formJsonResponse(w, 500, res)
+		formJsonResponse(w, 404, res)
 		return
 	}
 	chirp := mapChirp(dbChirp)
@@ -384,5 +384,24 @@ func (cfg *apiConfig) DeleteChirp(w http.ResponseWriter, r *http.Request) {
 		res := fmt.Sprintf(`{"error":"%v"}`, err)
 		formJsonResponse(w, 401, res)
 		return
+	}
+
+	owner, err := cfg.dbQueries.GetChirpOwner(r.Context(), chirpID)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 404, res)
+		return
+	}
+
+	if owner == userUUID {
+		err = cfg.dbQueries.DeleteChirp(r.Context(), chirpID)
+		if err != nil {
+			res := fmt.Sprintf(`{"error":"%v"}`, err)
+			formJsonResponse(w, 500, res)
+			return
+		}
+		w.WriteHeader(204)
+	} else {
+		w.WriteHeader(403)
 	}
 }

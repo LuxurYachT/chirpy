@@ -38,7 +38,7 @@ func main() {
 	birdmux.HandleFunc("POST /api/refresh", birdcfg.Refresh)
 	birdmux.HandleFunc("POST /api/revoke", birdcfg.Revoke)
 	birdmux.HandleFunc("PUT /api/users", birdcfg.UpdatePassword)
-	birdmux.HandleFunc("DELETE /api/chirps/{chirpID}", birdcfg.DeleteChirp)
+	birdmux.HandleFunc("DELETE /api/chirps/{chirpid}", birdcfg.DeleteChirp)
 
 	var birdserver http.Server
 	birdserver.Addr = ":8080"
