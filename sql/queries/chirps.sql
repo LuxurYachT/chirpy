@@ -14,3 +14,6 @@ select * from chirps;
 
 -- name: GetChirp :one
 select * from chirps where id = $1;
+
+-- name: DeleteChirp :exec
+delete 

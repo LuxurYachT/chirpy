@@ -306,3 +306,83 @@ func (cfg *apiConfig) Revoke(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(204)
 }
+
+func (cfg *apiConfig) UpdatePassword(w http.ResponseWriter, r *http.Request) {
+	type cred struct {
+		Password string
+		Email    string
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	creds := cred{}
+	err := decoder.Decode(&creds)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	userUUID, err := auth.ValidateJWT(token, cfg.Secret)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	hash, err := auth.HashPassword(creds.Password)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	userParam := database.UpdateUserParams{
+		Email:          creds.Email,
+		HashedPassword: hash,
+		ID:             userUUID,
+	}
+
+	user, err := cfg.dbQueries.UpdateUser(r.Context(), userParam)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	jsr, err := json.Marshal(user)
+	if err != nil {
+		panic(err)
+	}
+	respondWithJson(w, 200, jsr)
+}
+
+func (cfg *apiConfig) DeleteChirp(w http.ResponseWriter, r *http.Request) {
+	idstr := r.PathValue("chirpid")
+	chirpID, err := uuid.Parse(idstr)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	userUUID, err := auth.ValidateJWT(token, cfg.Secret)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+}
