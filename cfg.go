@@ -252,5 +252,57 @@ func (cfg *apiConfig) GetChirpByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) Refresh(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
 
+	session, err := cfg.dbQueries.GetRefreshToken(r.Context(), token)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	if session.ExpiresAt.Before(time.Now()) {
+		res := `{"error":"session expired"}`
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	if session.RevokedAt.Valid {
+		res := `{"error":"session revoked"}`
+		formJsonResponse(w, 401, res)
+		return
+	} else {
+		jwt, err := auth.MakeJWT(session.UserID, cfg.Secret)
+		if err != nil {
+			res := fmt.Sprintf(`{"error":"%v"}`, err)
+			formJsonResponse(w, 500, res)
+			return
+		}
+
+		res := fmt.Sprintf(`{"token":"%v"}`, jwt)
+		formJsonResponse(w, 200, res)
+	}
+}
+
+func (cfg *apiConfig) Revoke(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 401, res)
+		return
+	}
+
+	err = cfg.dbQueries.RevokeToken(r.Context(), token)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	w.WriteHeader(204)
 }

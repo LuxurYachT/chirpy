@@ -35,6 +35,8 @@ func main() {
 	birdmux.HandleFunc("GET /api/chirps", birdcfg.GetChirps)
 	birdmux.HandleFunc("GET /api/chirps/{chirpid}", birdcfg.GetChirpByID)
 	birdmux.HandleFunc("POST /api/login", birdcfg.Login)
+	birdmux.HandleFunc("POST /api/refresh", birdcfg.Refresh)
+	birdmux.HandleFunc("POST /api/revoke", birdcfg.Revoke)
 
 	var birdserver http.Server
 	birdserver.Addr = ":8080"
@@ -67,14 +69,9 @@ func Validate_chirp(r *http.Request) (bool, error) {
 }
 
 func formJsonResponse(w http.ResponseWriter, status int, resp string) {
-	raw := json.RawMessage(resp)
-	jsr, err := json.Marshal(raw)
-	if err != nil {
-		panic(err)
-	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(jsr)
+	w.Write([]byte(resp))
 }
 
 func respondWithJson(w http.ResponseWriter, status int, resp []byte) {
