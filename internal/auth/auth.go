@@ -80,3 +80,12 @@ func MakeRefreshTOken() (string, error) {
 	rand.Read(key)
 	return hex.EncodeToString(key), nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	authString := headers.Get("Authorization")
+	if len(authString) <= 0 {
+		return "", errors.New("no key present")
+	}
+	keyString := strings.TrimPrefix(authString, "ApiKey ")
+	return keyString, nil
+}

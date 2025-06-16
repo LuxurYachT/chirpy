@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -24,6 +25,7 @@ func main() {
 	birdcfg := apiConfig{}
 	birdcfg.Platform = os.Getenv("PLATFORM")
 	birdcfg.Secret = os.Getenv("SECRET")
+	birdcfg.PolkaKey = os.Getenv("POLKAKEY")
 	birdcfg.dbQueries = database.New(db)
 	var birdmux = http.NewServeMux()
 	birdmux.Handle("/app/", http.StripPrefix("/app", birdcfg.mwMetricsInc(http.FileServer(http.Dir(".")))))
@@ -39,6 +41,7 @@ func main() {
 	birdmux.HandleFunc("POST /api/revoke", birdcfg.Revoke)
 	birdmux.HandleFunc("PUT /api/users", birdcfg.UpdatePassword)
 	birdmux.HandleFunc("DELETE /api/chirps/{chirpid}", birdcfg.DeleteChirp)
+	birdmux.HandleFunc("POST /api/polka/webhooks", birdcfg.PolkaHook)
 
 	var birdserver http.Server
 	birdserver.Addr = ":8080"
@@ -106,4 +109,21 @@ func mapChirp(c database.Chirp) Chirp {
 		User_id:   c.UserID,
 	}
 	return chirp
+}
+
+func upgradeUser(cfg *apiConfig, w http.ResponseWriter, r *http.Request, user_id uuid.UUID) {
+	_, err := cfg.dbQueries.GetUserByID(r.Context(), user_id)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 404, res)
+		return
+	}
+
+	err = cfg.dbQueries.UpgradeToRed(r.Context(), user_id)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+	w.WriteHeader(204)
 }

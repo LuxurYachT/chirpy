@@ -18,6 +18,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	Platform       string
 	Secret         string
+	PolkaKey       string
 }
 
 func (cfg *apiConfig) mwMetricsInc(next http.Handler) http.Handler {
@@ -84,10 +85,11 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := User{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
+		ID:          dbUser.ID,
+		CreatedAt:   dbUser.CreatedAt,
+		UpdatedAt:   dbUser.UpdatedAt,
+		Email:       dbUser.Email,
+		IsChirpyRed: dbUser.IsChirpyRed,
 	}
 
 	jsr, err := json.Marshal(user)
@@ -142,12 +144,13 @@ func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
 	cfg.dbQueries.CreateRefreshToken(r.Context(), refparams)
 
 	user := User{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
-		Token:     token,
-		Refresh:   reftok,
+		ID:          dbUser.ID,
+		CreatedAt:   dbUser.CreatedAt,
+		UpdatedAt:   dbUser.UpdatedAt,
+		Email:       dbUser.Email,
+		Token:       token,
+		Refresh:     reftok,
+		IsChirpyRed: dbUser.IsChirpyRed,
 	}
 
 	jsr, err := json.Marshal(user)
@@ -403,5 +406,48 @@ func (cfg *apiConfig) DeleteChirp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 	} else {
 		w.WriteHeader(403)
+	}
+}
+
+func (cfg *apiConfig) PolkaHook(w http.ResponseWriter, r *http.Request) {
+	type polka struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	key, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		w.WriteHeader(401)
+		return
+	}
+
+	if key != cfg.PolkaKey {
+		w.WriteHeader(401)
+		return
+	}
+
+	polkaEvent := polka{}
+
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&polkaEvent)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	user_id, err := uuid.Parse(polkaEvent.Data.UserID)
+	if err != nil {
+		res := fmt.Sprintf(`{"error":"%v"}`, err)
+		formJsonResponse(w, 500, res)
+		return
+	}
+
+	if polkaEvent.Event == "user.upgraded" {
+		upgradeUser(cfg, w, r, user_id)
+	} else {
+		w.WriteHeader(204)
 	}
 }
