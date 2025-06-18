@@ -210,22 +210,50 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) GetChirps(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.dbQueries.GetChirps(r.Context())
-	if err != nil {
-		res := fmt.Sprintf(`{"error":"%v"}`, err)
-		formJsonResponse(w, 500, res)
+	q := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+	var chirps []database.Chirp
+	var err error
+
+	if q == "" {
+		chirps, err = cfg.dbQueries.GetChirps(r.Context())
+		if err != nil {
+			res := fmt.Sprintf(`{"error":"%v"}`, err)
+			formJsonResponse(w, 500, res)
+			return
+		}
+	} else {
+		user_id, err := uuid.Parse(q)
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		chirps, err = cfg.dbQueries.GetUsersChirps(r.Context(), user_id)
+		if err != nil {
+			w.WriteHeader(401)
+			return
+		}
+	}
+
+	if len(chirps) == 0 {
+		w.WriteHeader(404)
 		return
 	}
-	chirps := []Chirp{}
-	for _, c := range dbChirps {
-		chirps = append(chirps, mapChirp(c))
+
+	if sortOrder == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[j].CreatedAt.Before(chirps[i].CreatedAt)
+		})
+	} else {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+		})
 	}
-	sort.Slice(chirps, func(i, j int) bool {
-		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
-	})
+
 	jsr, err := json.Marshal(chirps)
 	if err != nil {
-		panic(err)
+		w.WriteHeader(500)
+		return
 	}
 	respondWithJson(w, 200, jsr)
 }
